@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "src"
+]
+testpaths = ["tests"]
+
+[project]
+name = "people_counter"
+version = "0.1.0"
+description = "A people counting application."
+requires-python = ">=3.8"

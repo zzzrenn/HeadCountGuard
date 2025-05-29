@@ -1,0 +1,29 @@
+# Video settings
+video:
+  path: "./videos/test.mp4"
+  save_result: true
+  fps: 30
+
+# Line crossing settings
+line:
+  position: 0.5  # normalized x-coordinate of the counting line (0-1)
+
+detector:
+  detector_type: "yolo"  # Options: "yolo"
+  model_path: "./models/yolov8s.pt"
+  class_id: 0
+  input_width: 640
+  input_height: 640
+  conf_threshold: 0.25
+
+# Tracking settings
+tracking:
+  tracker_type: "bytetrack"
+  track_thresh: 0.25    # tracking confidence threshold
+  track_buffer: 30     # frames to keep lost tracks
+  match_thresh: 0.8    # matching threshold for tracking
+
+# Display settings
+display:
+  max_width: 1280
+  max_height: 720

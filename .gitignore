@@ -1,0 +1,24 @@
+# Python virtual environment
+.venv/
+
+# IDE settings
+.vscode/
+
+# Python bytecode
+**/*.pyc
+
+# Build and distribution
+build/
+dist/
+*.egg-info
+
+# Testing and coverage
+.coverage
+coverage.xml
+pytest.ini
+htmlcov/
+
+# Project specific
+models/
+videos/
+outputs/

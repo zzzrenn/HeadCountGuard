@@ -1,0 +1,41 @@
+default_language_version:
+    python: python3
+
+repos:
+    - repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v5.0.0
+      hooks:
+        - id: trailing-whitespace
+          description: Removes trailing whitespace
+        - id: end-of-file-fixer
+          description: Ensures files end with a newline
+        - id: check-yaml
+          description: Checks yaml files for parseable syntax
+        - id: check-json
+          description: Checks json files for parseable syntax
+        - id: check-added-large-files
+          description: Prevents giant files from being committed
+          args: ['--maxkb=500']
+        - id: debug-statements
+          description: Checks for debugger imports and py37+ `breakpoint()` calls
+        - id: check-merge-conflict
+          description: Checks for files containing merge conflict strings
+        - id: detect-private-key
+
+    - repo: https://github.com/astral-sh/ruff-pre-commit
+      rev: v0.11.5
+      hooks:
+        # try to fix what is possible
+        - id: ruff
+          args: ["--fix"]
+          exclude: src/tracker/bytetrack/.*|__init__.py
+        - id: ruff
+          name: ruff sort imports
+          args: ["--fix", "--select", "I"]
+        - id: ruff
+          name: ruff check naming
+          args: ["--fix", "--select", "N"]
+          exclude: src/tracker/bytetrack/.*|__init__.py
+        # perform formatting updates
+        - id: ruff-format
+          entry: ruff format --force-exclude
