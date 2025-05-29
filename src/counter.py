@@ -3,7 +3,11 @@ from typing import Dict, List, Tuple
 
 class LineCrossingCounter:
     def __init__(
-        self, line_points: Tuple[Tuple[float, float], Tuple[float, float]], in_side: str
+        self,
+        line_points: Tuple[Tuple[float, float], Tuple[float, float]],
+        in_side: str,
+        frame_width: int,
+        frame_height: int,
     ):
         """
         Initialize the line crossing counter.
@@ -13,6 +17,8 @@ class LineCrossingCounter:
                         Coordinates are normalized between 0 and 1
             in_side: Which side is considered "in": "left" or "right"
                     For horizontal lines, "left" means bottom
+            frame_width: Width of the frame in pixels
+            frame_height: Height of the frame in pixels
         """
         # Sort points by y-coordinate to ensure consistent behavior
         p1, p2 = line_points
@@ -23,14 +29,14 @@ class LineCrossingCounter:
         self.in_side = in_side
         self.count = 0
         self.tracked_positions = {}  # track_id -> previous position
+        self.frame_width = frame_width
+        self.frame_height = frame_height
 
-    def _get_center(
-        self, bbox: List[float], frame_width: int, frame_height: int
-    ) -> Tuple[float, float]:
+    def _get_center(self, bbox: List[float]) -> Tuple[float, float]:
         """Calculate the normalized center coordinates of a bounding box."""
         center_x = (bbox[0] + bbox[2]) / 2
         center_y = (bbox[1] + bbox[3]) / 2
-        return center_x / frame_width, center_y / frame_height
+        return center_x / self.frame_width, center_y / self.frame_height
 
     def _is_point_on_in_side(self, point: Tuple[float, float]) -> bool:
         """Check if a point is on the 'in' side of the line."""
@@ -47,23 +53,19 @@ class LineCrossingCounter:
         # For non-horizontal lines
         return (cross_product > 0) == (self.in_side == "left")
 
-    def update(
-        self, tracked_objects: List[Dict], frame_width: int, frame_height: int
-    ) -> int:
+    def update(self, tracked_objects: List[Dict]) -> int:
         """
         Update the counter based on tracked objects crossing the line.
 
         Args:
             tracked_objects: List of tracked objects with their positions
-            frame_width: Width of the frame in pixels
-            frame_height: Height of the frame in pixels
 
         Returns:
             Updated count
         """
         for obj in tracked_objects:
             track_id = obj["track_id"]
-            current_center = self._get_center(obj["bbox"], frame_width, frame_height)
+            current_center = self._get_center(obj["bbox"])
 
             if track_id in self.tracked_positions:
                 prev_center = self.tracked_positions[track_id]

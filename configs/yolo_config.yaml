@@ -8,7 +8,7 @@ video:
 line:
   x1: 0  # normalized x-coordinate of line start point (0-1)
   y1: 0  # normalized y-coordinate of line start point (0-1)
-  x2: 1    # normalized x-coordinate of line end point (0-1)
+  x2: 0.5    # normalized x-coordinate of line end point (0-1)
   y2: 1    # normalized y-coordinate of line end point (0-1)
   in_side: "left"  # which side is considered "in": "left" or "right" (for horizontal lines, left means bottom)
 

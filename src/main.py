@@ -17,18 +17,6 @@ def load_config(config_path="config.yaml"):
 
 
 def main(config):
-    # Initialize components
-    detector = PersonDetector(**config["detector"])
-
-    tracker = PersonTracker(**config["tracking"])
-
-    # Get line points from config
-    line_points = (
-        (config["line"]["x1"], config["line"]["y1"]),
-        (config["line"]["x2"], config["line"]["y2"]),
-    )
-    counter = LineCrossingCounter(line_points, config["line"]["in_side"])
-
     # Initialize video capture
     cap = cv2.VideoCapture(config["video"]["path"])
     if not cap.isOpened():
@@ -38,6 +26,12 @@ def main(config):
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
+
+    # Get line points from config
+    line_points = (
+        (config["line"]["x1"], config["line"]["y1"]),
+        (config["line"]["x2"], config["line"]["y2"]),
+    )
 
     # Calculate line endpoints in pixel coordinates
     p1 = (int(width * config["line"]["x1"]), int(height * config["line"]["y1"]))
@@ -60,6 +54,11 @@ def main(config):
             save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
         )
 
+    # Initialize components
+    detector = PersonDetector(**config["detector"])
+    tracker = PersonTracker(**config["tracking"])
+    counter = LineCrossingCounter(line_points, config["line"]["in_side"], width, height)
+
     frame_id = 0
     results = []
     previous_count = 0
@@ -79,7 +78,7 @@ def main(config):
         )
 
         # Update counter
-        count = counter.update(tracked_objects, width, height)
+        count = counter.update(tracked_objects)
         if count != previous_count:
             logger.info(f"Frame {frame_id}: Count={count}")
             previous_count = count
