@@ -1,6 +1,7 @@
 from typing import Dict, List
 
 import numpy as np
+from loguru import logger
 
 from detectors.detector_factory import DetectorFactory
 
@@ -16,6 +17,7 @@ class PersonDetector:
             **kwargs: Additional arguments for detector initialization
         """
         self.detector = DetectorFactory.create_detector(detector_type, **kwargs)
+        logger.info(f"Detector initialized: {detector_type}")
 
     def detect(self, frame: np.ndarray) -> List[Dict]:
         """

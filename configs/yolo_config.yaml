@@ -1,12 +1,16 @@
 # Video settings
 video:
   path: "./videos/test.mp4"
-  save_result: true
+  save_result: false
   fps: 30
 
-# Line crossing settings
+# Separator line settings
 line:
-  position: 0.5  # normalized x-coordinate of the counting line (0-1)
+  x1: 0  # normalized x-coordinate of line start point (0-1)
+  y1: 0  # normalized y-coordinate of line start point (0-1)
+  x2: 1    # normalized x-coordinate of line end point (0-1)
+  y2: 1    # normalized y-coordinate of line end point (0-1)
+  in_side: "left"  # which side is considered "in": "left" or "right" (for horizontal lines, left means bottom)
 
 detector:
   detector_type: "yolo"  # Options: "yolo"

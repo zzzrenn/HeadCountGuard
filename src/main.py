@@ -21,7 +21,13 @@ def main(config):
     detector = PersonDetector(**config["detector"])
 
     tracker = PersonTracker(**config["tracking"])
-    counter = LineCrossingCounter(config["line"]["position"])
+
+    # Get line points from config
+    line_points = (
+        (config["line"]["x1"], config["line"]["y1"]),
+        (config["line"]["x2"], config["line"]["y2"]),
+    )
+    counter = LineCrossingCounter(line_points, config["line"]["in_side"])
 
     # Initialize video capture
     cap = cv2.VideoCapture(config["video"]["path"])
@@ -33,8 +39,16 @@ def main(config):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
 
-    # Calculate separation line position
-    line_x = int(width * config["line"]["position"])
+    # Calculate line endpoints in pixel coordinates
+    p1 = (int(width * config["line"]["x1"]), int(height * config["line"]["y1"]))
+    p2 = (int(width * config["line"]["x2"]), int(height * config["line"]["y2"]))
+    if p1[1] > p2[1]:
+        p1, p2 = p2, p1
+
+    # find minimum scale factor to fit the line in the frame
+    scale = min(width / (p2[0] - p1[0]), height / (p2[1] - p1[1]))
+    p1 = (int(p1[0] * scale), int(p1[1] * scale))
+    p2 = (int(p2[0] * scale), int(p2[1] * scale))
 
     # Setup video writer if saving results
     if config["video"]["save_result"]:
@@ -48,11 +62,8 @@ def main(config):
 
     frame_id = 0
     results = []
-
+    previous_count = 0
     while True:
-        if frame_id % 20 == 0:
-            logger.info(f"Processing frame {frame_id}")
-
         ret_val, frame = cap.read()
         if not ret_val:
             break
@@ -68,17 +79,35 @@ def main(config):
         )
 
         # Update counter
-        count = counter.update(tracked_objects, width)
+        count = counter.update(tracked_objects, width, height)
+        if count != previous_count:
+            logger.info(f"Frame {frame_id}: Count={count}")
+            previous_count = count
 
         # Draw separation line
-        cv2.line(frame, (line_x, 0), (line_x, height), (0, 255, 0), 2)
+        cv2.line(frame, p1, p2, (0, 255, 0), 2)
+
+        # Calculate line direction vector for label placement
+        line_vector = (p2[0] - p1[0], p2[1] - p1[1])
+        line_length = (line_vector[0] ** 2 + line_vector[1] ** 2) ** 0.5
+        line_normal = (-line_vector[1] / line_length, line_vector[0] / line_length)
 
         # Draw in/out labels
+        label_offset = 30
+        in_label_pos = (
+            int((p1[0] + p2[0]) / 2 + line_normal[0] * label_offset),
+            int((p1[1] + p2[1]) / 2 + line_normal[1] * label_offset),
+        )
+        out_label_pos = (
+            int((p1[0] + p2[0]) / 2 - line_normal[0] * label_offset),
+            int((p1[1] + p2[1]) / 2 - line_normal[1] * label_offset),
+        )
+
         cv2.putText(
-            frame, "IN", (line_x + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+            frame, "IN", in_label_pos, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
         )
         cv2.putText(
-            frame, "OUT", (line_x - 80, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+            frame, "OUT", out_label_pos, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
         )
 
         # Draw count

@@ -1,5 +1,7 @@
 from typing import Dict, List, Tuple
 
+from loguru import logger
+
 from tracker.tracker_factory import TrackerFactory
 
 
@@ -16,6 +18,7 @@ class PersonTracker:
             frame_rate: Frame rate of the video
         """
         self.tracker = TrackerFactory.create_tracker(tracker_type, **kwargs)
+        logger.info(f"Tracker initialized: {tracker_type}")
 
     def update(
         self, detections: List[Dict], img_info: List[int], img_size: Tuple[int, int]
