@@ -1,5 +1,3 @@
-import os
-import sys
 from typing import Any, Callable, Dict, Optional
 
 import cv2
@@ -8,13 +6,6 @@ from loguru import logger
 from PyQt5.QtCore import QPoint, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap, QPolygon
 from PyQt5.QtWidgets import QLabel, QVBoxLayout, QWidget
-
-# Add parent directories to path for imports
-sys.path.append(
-    os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    )
-)
 
 from app.core.line_manager import LineManager
 from app.core.roi_manager import ROIManager
