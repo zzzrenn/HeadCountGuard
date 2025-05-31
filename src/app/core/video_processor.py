@@ -12,11 +12,15 @@ class VideoProcessor:
     """Handles video processing, detection, tracking, and counting."""
 
     def __init__(
-        self, detector_config: Dict[str, Any], tracking_config: Dict[str, Any]
+        self,
+        detector_config: Dict[str, Any],
+        tracking_config: Dict[str, Any],
+        line_crossing_config: Dict[str, Any],
     ):
         self.detector = PersonDetector(**detector_config)
         self.tracker = PersonTracker(**tracking_config)
         self.counter: Optional[LineCrossingCounter] = None
+        self.line_crossing_config = line_crossing_config
 
         # Video properties
         self.cap: Optional[cv2.VideoCapture] = None
@@ -93,6 +97,7 @@ class VideoProcessor:
             in_side=in_side,
             frame_width=self.frame_width,
             frame_height=self.frame_height,
+            **self.line_crossing_config,
         )
 
     def set_callbacks(

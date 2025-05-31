@@ -31,3 +31,6 @@ tracking:
 display:
   max_width: 1280
   max_height: 720
+
+line_crossing:
+  crossing_criteria: "bottom"  # Options: "center", "top", "bottom", "left", "right", "whole_bbox"

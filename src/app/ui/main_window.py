@@ -41,6 +41,7 @@ class PeopleCounterApp(QMainWindow):
         self.video_processor = VideoProcessor(
             self.config_manager.get_detector_config(),
             self.config_manager.get_tracking_config(),
+            self.config_manager.get_line_crossing_config(),
         )
         self.coord_transformer = CoordinateTransformer(0, 0)
         self.line_manager = LineManager(self.coord_transformer)

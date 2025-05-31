@@ -33,3 +33,7 @@ class ConfigManager:
     def get_tracking_config(self) -> Dict[str, Any]:
         """Get tracking configuration."""
         return self.config.get("tracking", {})
+
+    def get_line_crossing_config(self) -> Dict[str, Any]:
+        """Get line crossing configuration."""
+        return self.config.get("line_crossing", {})
