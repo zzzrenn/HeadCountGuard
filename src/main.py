@@ -62,7 +62,15 @@ def main(config):
     frame_id = 0
     results = []
     previous_count = 0
+
+    # FPS calculation variables
+    display_fps = 0.0
+    frame_start_time = time.time()
+
     while True:
+        # Start timing for this frame
+        frame_start_time = time.time()
+
         ret_val, frame = cap.read()
         if not ret_val:
             break
@@ -120,6 +128,17 @@ def main(config):
             2,
         )
 
+        # Draw FPS
+        cv2.putText(
+            frame,
+            f"FPS: {display_fps:.1f}",
+            (10, 70),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            2,
+        )
+
         # Draw bounding boxes and track IDs
         for obj in tracked_objects:
             bbox = obj["bbox"]
@@ -157,6 +176,17 @@ def main(config):
 
         # Display frame
         cv2.imshow("People Counter", frame)
+
+        # Calculate FPS after complete frame processing
+        frame_end_time = time.time()
+        frame_time = frame_end_time - frame_start_time
+        if frame_time > 0:
+            current_fps = 1.0 / frame_time
+            # Smooth FPS display using exponential moving average
+            if display_fps == 0.0:
+                display_fps = current_fps
+            else:
+                display_fps = 0.9 * display_fps + 0.1 * current_fps
 
         # Break loop on 'q' key press
         if cv2.waitKey(1) & 0xFF == ord("q"):
