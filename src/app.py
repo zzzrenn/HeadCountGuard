@@ -6,14 +6,11 @@ A high-performance people counting application with video processing,
 line drawing interface, and real-time histogram visualization using PyQt.
 """
 
-import os
 import sys
 
+from loguru import logger
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
-
-# Add the parent directory to the path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.ui.main_window import PeopleCounterApp
 
@@ -30,16 +27,15 @@ def main():
         main_window = PeopleCounterApp()
         main_window.show()
 
+        logger.info("People Counter application started successfully")
+
         # Start the application event loop
         sys.exit(app.exec_())
 
     except KeyboardInterrupt:
-        print("\nApplication interrupted by user")
+        logger.info("Application interrupted by user")
     except Exception as e:
-        print(f"An error occurred: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.exception(f"An error occurred: {e}")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import time
 from collections import deque
 
 import numpy as np
+from loguru import logger
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QFrame,
@@ -23,6 +24,7 @@ sys.path.append(
 
 from app.core.config_manager import ConfigManager
 from app.core.line_manager import LineManager
+from app.core.roi_manager import ROIManager
 from app.core.video_processor import VideoProcessor
 from app.ui.controls import ControlsWidget
 from app.ui.histogram import HistogramWidget
@@ -45,9 +47,13 @@ class PeopleCounterApp(QMainWindow):
         )
         self.coord_transformer = CoordinateTransformer(0, 0)
         self.line_manager = LineManager(self.coord_transformer)
+        self.roi_manager = ROIManager(self.coord_transformer)
 
         # UI state
         self.is_processing = False
+        self.line_drawn = False
+        self.side_selected = False
+        self.selected_side = None
 
         # FPS tracking
         self.frame_times = deque(maxlen=30)  # Keep last 30 frame times for averaging
@@ -78,8 +84,10 @@ class PeopleCounterApp(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
 
-        # Create video display widget
-        self.video_display = VideoDisplayWidget(self.line_manager)
+        # Create video display widget with both managers
+        self.video_display = VideoDisplayWidget(self.line_manager, self.roi_manager)
+        # Always start in line mode
+        self.video_display.set_drawing_mode("line")
         video_frame = QFrame()
         video_frame.setFrameStyle(QFrame.StyledPanel)
         video_layout = QVBoxLayout(video_frame)
@@ -113,13 +121,19 @@ class PeopleCounterApp(QMainWindow):
         """Setup callbacks between components."""
         # Video display callbacks
         self.video_display.set_callbacks(
-            line_finish_callback=self.on_line_drawing_finished
+            line_finish_callback=self.on_line_drawing_finished,
+            roi_point_added_callback=self.on_roi_point_added,
+            roi_finish_callback=self.on_roi_drawing_finished,
         )
 
         # Controls callbacks
         self.controls.set_callbacks(
             video_select_callback=self.on_video_selected,
             draw_line_callback=self.on_draw_line_clicked,
+            draw_roi_callback=self.on_draw_roi_clicked,
+            cancel_roi_callback=self.on_cancel_roi_clicked,
+            skip_roi_callback=self.on_skip_roi_clicked,
+            confirm_callback=self.on_confirm_clicked,
             side_select_callback=self.on_side_selected,
             side_preview_callback=self.on_side_preview,
             side_clear_callback=self.on_side_clear,
@@ -138,15 +152,41 @@ class PeopleCounterApp(QMainWindow):
         if not success:
             return
 
+        # Reset processing state
+        self.is_processing = False
+        if self.processing_timer.isActive():
+            self.processing_timer.stop()
+
         # Update coordinate transformer with video dimensions
         props = self.video_processor.get_video_properties()
         self.coord_transformer.update_frame_size(props["width"], props["height"])
 
-        # Reset line manager for new video
+        # Reset managers for new video
         self.line_manager.reset()
+        self.roi_manager.reset()
+        self.line_drawn = False
+        self.side_selected = False
+        self.selected_side = None
 
-        # Reset video display
+        # Reset video display to line mode
+        self.video_display.set_drawing_mode("line")
+        self.video_display.set_processing_active(False)  # Allow canvas interactions
         self.video_display.reset_display()
+
+        # Reset all UI controls to initial state
+        self.controls.draw_line_btn.setEnabled(False)  # Will be enabled below
+        self.controls.side_group.setEnabled(False)
+        self.controls.roi_group.setEnabled(False)
+
+        # Reset ROI button states specifically
+        self.controls.draw_roi_btn.setEnabled(
+            True
+        )  # Default enabled state within group
+        self.controls.skip_roi_btn.setEnabled(
+            True
+        )  # Default enabled state within group
+        self.controls.cancel_roi_btn.setVisible(False)
+        self.controls.confirm_btn.setEnabled(False)
 
         # Clear histogram
         self.histogram.clear_plot()
@@ -163,38 +203,131 @@ class PeopleCounterApp(QMainWindow):
         first_frame = self.video_processor.get_first_frame()
         if first_frame is not None:
             self.video_display.update_frame(first_frame, is_original=True)
+            # Enable line drawing (step 2)
             self.controls.enable_line_drawing()
+            logger.info("New video loaded, line drawing enabled")
 
     def on_draw_line_clicked(self):
         """Handle draw line button click."""
+        logger.info("Draw line clicked")
+        # Reset states when drawing a new line
+        self.line_manager.reset()
+        self.roi_manager.reset()
+        self.line_drawn = False
+        self.side_selected = False
+        self.selected_side = None
+
+        # Reset UI states for fresh start
+        self.controls.side_group.setEnabled(False)
+        self.controls.roi_group.setEnabled(False)
+        self.controls.confirm_btn.setEnabled(False)
+
+        # Start line drawing
         self.line_manager.start_drawing()
+
+    def on_draw_roi_clicked(self):
+        """Handle draw ROI button click."""
+        self.video_display.set_drawing_mode("roi")
+        self.roi_manager.start_drawing()
+
+    def on_cancel_roi_clicked(self):
+        """Handle cancel ROI button click."""
+        logger.info("Cancel ROI clicked")
+        self.roi_manager.cancel_drawing()
+        self.video_display.set_drawing_mode("line")
+        self.video_display.update_preview()
+
+        # Reset confirm button state - only enable if we had skipped ROI before
+        # For now, disable it and let user choose skip or draw ROI again
+        self.controls.confirm_btn.setEnabled(False)
+
+    def on_skip_roi_clicked(self):
+        """Handle skip ROI button click - enable confirm button for processing without ROI."""
+        logger.info("Skip ROI clicked - enabling confirm button")
+        # Just enable the confirm button, don't start processing automatically
+        self.controls.confirm_btn.setEnabled(True)
+        # Keep ROI drawing options enabled in case user changes their mind
+        # Don't disable the draw_roi_btn and skip_roi_btn
+
+    def on_confirm_clicked(self):
+        """Handle confirm button click - start processing with ROI."""
+        logger.info("Confirm clicked - starting processing")
+        self.start_processing()
 
     def on_line_drawing_finished(self):
         """Handle completion of line drawing."""
         if self.line_manager.has_line():
+            self.line_drawn = True
+            # Enable side selection (step 3) but keep line drawing enabled for re-drawing
             self.controls.enable_side_selection()
+            self.controls.enable_line_drawing()  # Allow re-drawing line
+
+    def on_roi_drawing_finished(self):
+        """Handle completion of ROI drawing."""
+        logger.info("Main window - ROI drawing finished!")
+        if self.roi_manager.has_roi():
+            logger.info(
+                "Main window - ROI manager has ROI, calling controls.on_roi_finished()"
+            )
+            self.controls.on_roi_finished()
+        else:
+            logger.info("Main window - ROI manager does NOT have ROI")
 
     def on_side_selected(self, side: str):
         """Handle side selection."""
+        logger.info(f"Side selected: {side}")
         self.line_manager.select_side(side)
+        self.side_selected = True
+        self.selected_side = side
 
-        # Setup counter with normalized line coordinates
+        # Enable ROI options (step 4) but keep previous steps enabled
+        logger.info("Calling enable_roi_options")
+        self.controls.enable_roi_options()
+        # Keep line drawing and side selection enabled for modifications
+        self.controls.enable_line_drawing()
+        self.controls.enable_side_selection()
+
+    def start_processing(self):
+        """Start video processing with current line and optional ROI."""
+        if not self.line_drawn or not self.side_selected:
+            return
+
+        # Disable canvas interactions during processing
+        self.video_display.set_processing_active(True)
+
+        # Setup counter based on whether ROI is drawn
         normalized_line = self.line_manager.get_normalized_line()
-        if normalized_line:
-            self.video_processor.setup_counter(normalized_line, side)
+        if not normalized_line:
+            return
+
+        if self.roi_manager.has_roi():
+            # Use line + ROI
+            props = self.video_processor.get_video_properties()
+            roi_mask = self.roi_manager.create_roi_mask(props["width"], props["height"])
+            self.video_processor.setup_counter_with_roi(
+                normalized_line, self.selected_side, roi_mask
+            )
+            logger.info("Starting processing with line and ROI filter")
+        else:
+            # Use line only
+            self.video_processor.setup_counter(normalized_line, self.selected_side)
+            logger.info("Starting processing with line only")
+
+        # Disable all controls during processing
+        self.controls.disable_all_drawing()
 
         # Start video processing
         self.start_video_processing()
 
     def on_side_preview(self, side: str):
         """Handle side preview on hover."""
-        if not self.is_processing:  # Only show preview if not currently processing
+        if not self.is_processing and self.line_drawn:
             props = self.video_processor.get_video_properties()
             self.video_display.preview_side(side, props["width"], props["height"])
 
     def on_side_clear(self):
         """Handle clearing side preview."""
-        if not self.is_processing:  # Only clear preview if not currently processing
+        if not self.is_processing:
             self.video_display.clear_preview()
 
     def start_video_processing(self):
@@ -270,7 +403,20 @@ class PeopleCounterApp(QMainWindow):
         self.processing_timer.stop()
         # Final histogram update
         self.histogram.update_plot(count_history, frame_history)
-        print("Video playback completed")
+        logger.info("Video playback completed - ready for new video")
+
+    def on_roi_point_added(self):
+        """Handle when a ROI point is added."""
+        # Check if we have enough points for a valid ROI
+        if self.roi_manager.has_roi():
+            logger.info(
+                f"ROI now has {len(self.roi_manager.roi_points)} points - enabling confirm button"
+            )
+            self.controls.confirm_btn.setEnabled(True)
+        else:
+            logger.info(
+                f"ROI has {len(self.roi_manager.roi_points)} points - need at least 3"
+            )
 
     def closeEvent(self, event):
         """Handle window close event."""

@@ -1,6 +1,7 @@
 from typing import Any, Dict
 
 import yaml
+from loguru import logger
 
 
 class ConfigManager:
@@ -16,10 +17,10 @@ class ConfigManager:
             with open(self.config_path, "r") as f:
                 return yaml.safe_load(f)
         except FileNotFoundError:
-            print(f"Warning: Config file {self.config_path} not found. Using defaults.")
+            logger.warning(f"Config file {self.config_path} not found. Using defaults.")
             return self._get_default_config()
         except yaml.YAMLError as e:
-            print(f"Error parsing config file: {e}. Using defaults.")
+            logger.error(f"Error parsing config file: {e}. Using defaults.")
             return self._get_default_config()
 
     def _get_default_config(self) -> Dict[str, Any]:

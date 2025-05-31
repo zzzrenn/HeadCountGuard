@@ -2,6 +2,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import cv2
 import numpy as np
+from loguru import logger
 
 from counter import LineCrossingCounter
 from detectors import PersonDetector
@@ -47,7 +48,7 @@ class VideoProcessor:
         self.cap = cv2.VideoCapture(video_path)
 
         if not self.cap.isOpened():
-            print("Error: Could not open video file")
+            logger.error("Could not open video file")
             return False
 
         # Get video properties
@@ -97,6 +98,30 @@ class VideoProcessor:
             in_side=in_side,
             frame_width=self.frame_width,
             frame_height=self.frame_height,
+            **self.line_crossing_config,
+        )
+
+    def setup_counter_with_roi(
+        self, line_points: tuple, in_side: str, roi_mask: np.ndarray
+    ):
+        """Setup the line crossing counter with ROI mask."""
+        # Ensure ROI mask has the correct dimensions
+        if roi_mask.shape != (self.frame_height, self.frame_width):
+            # Resize ROI mask to match frame dimensions
+            roi_mask = cv2.resize(
+                roi_mask,
+                (self.frame_width, self.frame_height),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            # Convert to binary mask
+            roi_mask = (roi_mask > 0).astype(np.uint8) * 255
+
+        self.counter = LineCrossingCounter(
+            line_points=line_points,
+            in_side=in_side,
+            frame_width=self.frame_width,
+            frame_height=self.frame_height,
+            roi_mask=roi_mask,
             **self.line_crossing_config,
         )
 

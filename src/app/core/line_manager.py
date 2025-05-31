@@ -23,12 +23,32 @@ class LineManager:
         """Property to check if currently drawing."""
         return self.drawing_line
 
-    def start_drawing(self):
-        """Start drawing a new line."""
-        self.drawing_line = True
-        self.line_start = None
-        self.line_end = None
-        self.cached_drawing_info = None
+    def start_drawing(
+        self,
+        canvas_x: int = None,
+        canvas_y: int = None,
+        canvas_width: int = None,
+        canvas_height: int = None,
+    ):
+        """Start drawing a new line with optional initial coordinates."""
+        if (
+            canvas_x is not None
+            and canvas_y is not None
+            and canvas_width is not None
+            and canvas_height is not None
+        ):
+            # Start with specific coordinates
+            self.drawing_line = True
+            self.line_start = None
+            self.line_end = None
+            self.cached_drawing_info = None
+            self.set_line_start(canvas_x, canvas_y, canvas_width, canvas_height)
+        else:
+            # Original start_drawing method
+            self.drawing_line = True
+            self.line_start = None
+            self.line_end = None
+            self.cached_drawing_info = None
 
     def start_line(
         self, canvas_x: int, canvas_y: int, canvas_width: int, canvas_height: int
@@ -80,6 +100,18 @@ class LineManager:
     def select_side(self, side: str):
         """Select which side is the IN side."""
         self.selected_side = side
+
+    def set_side_selection(self, side: str):
+        """Set which side is the IN side (alias for select_side)."""
+        self.select_side(side)
+
+    def clear_side_selection(self):
+        """Clear the side selection."""
+        self.selected_side = None
+
+    def get_side_selection(self) -> Optional[str]:
+        """Get the currently selected side."""
+        return self.selected_side
 
     def has_line(self) -> bool:
         """Check if a line has been drawn."""

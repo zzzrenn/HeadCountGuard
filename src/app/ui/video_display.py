@@ -4,8 +4,9 @@ from typing import Any, Callable, Dict, Optional
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
+from loguru import logger
+from PyQt5.QtCore import QPoint, Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap, QPolygon
 from PyQt5.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 # Add parent directories to path for imports
@@ -16,18 +17,21 @@ sys.path.append(
 )
 
 from app.core.line_manager import LineManager
+from app.core.roi_manager import ROIManager
 
 
 class VideoDisplayWidget(QWidget):
-    """Widget for displaying video frames and handling line drawing."""
+    """Widget for displaying video frames and handling line drawing and ROI drawing."""
 
     # Define signals
     line_finished = pyqtSignal()
+    roi_finished = pyqtSignal()
 
-    def __init__(self, line_manager: LineManager):
+    def __init__(self, line_manager: LineManager, roi_manager: ROIManager = None):
         super().__init__()
 
         self.line_manager = line_manager
+        self.roi_manager = roi_manager
 
         # Display state
         self.current_frame: Optional[np.ndarray] = None
@@ -45,11 +49,15 @@ class VideoDisplayWidget(QWidget):
         # Drawing state
         self.is_drawing = False
         self.start_point = None
+        self.drawing_mode = "line"  # "line" or "roi"
+        self.processing_active = False  # Flag to prevent drawing during processing
 
         # Callbacks
         self.line_start_callback: Optional[Callable] = None
         self.line_update_callback: Optional[Callable] = None
         self.line_finish_callback: Optional[Callable] = None
+        self.roi_point_added_callback: Optional[Callable] = None
+        self.roi_finish_callback: Optional[Callable] = None
 
         self.setup_ui()
 
@@ -76,16 +84,29 @@ class VideoDisplayWidget(QWidget):
 
         layout.addWidget(self.video_label)
 
+    def set_roi_manager(self, roi_manager: ROIManager):
+        """Set the ROI manager for this widget."""
+        self.roi_manager = roi_manager
+
+    def set_drawing_mode(self, mode: str):
+        """Set the drawing mode: 'line' or 'roi'."""
+        if mode in ["line", "roi"]:
+            self.drawing_mode = mode
+
     def set_callbacks(
         self,
         line_start_callback: Callable = None,
         line_update_callback: Callable = None,
         line_finish_callback: Callable = None,
+        roi_point_added_callback: Callable = None,
+        roi_finish_callback: Callable = None,
     ):
-        """Set callback functions for line drawing events."""
+        """Set callback functions for drawing events."""
         self.line_start_callback = line_start_callback
         self.line_update_callback = line_update_callback
         self.line_finish_callback = line_finish_callback
+        self.roi_point_added_callback = roi_point_added_callback
+        self.roi_finish_callback = roi_finish_callback
 
     def update_frame(self, frame: np.ndarray, is_original: bool = False):
         """Update the displayed frame."""
@@ -121,6 +142,10 @@ class VideoDisplayWidget(QWidget):
             self.line_manager.coord_transformer.update_frame_size(
                 frame_width, frame_height
             )
+            if self.roi_manager:
+                self.roi_manager.coord_transformer.update_frame_size(
+                    frame_width, frame_height
+                )
 
             # Calculate aspect ratio and new dimensions
             aspect_ratio = frame_width / frame_height
@@ -169,11 +194,25 @@ class VideoDisplayWidget(QWidget):
                 resized_frame.data, width, height, bytes_per_line, QImage.Format_RGB888
             )
 
-        # Check if we need line overlay
-        drawing_info = self.line_manager.get_drawing_info(widget_width, widget_height)
-        has_line_overlay = drawing_info and drawing_info.get("has_line", False)
+        # Check if we need overlays
+        line_drawing_info = self.line_manager.get_drawing_info(
+            widget_width, widget_height
+        )
+        has_line_overlay = line_drawing_info and line_drawing_info.get(
+            "has_line", False
+        )
 
-        if has_line_overlay:
+        roi_drawing_info = None
+        has_roi_overlay = False
+        if self.roi_manager:
+            roi_drawing_info = self.roi_manager.get_drawing_info(
+                widget_width, widget_height
+            )
+            has_roi_overlay = roi_drawing_info and roi_drawing_info.get(
+                "has_roi", False
+            )
+
+        if has_line_overlay or has_roi_overlay:
             # Only use QPainter when we need to draw overlays
             self.display_pixmap.fill(Qt.black)
             painter = QPainter(self.display_pixmap)
@@ -181,10 +220,15 @@ class VideoDisplayWidget(QWidget):
             # Draw the video frame
             painter.drawImage(dims["offset_x"], dims["offset_y"], q_image)
 
-            # Draw line overlay
-            self._draw_line_overlay(painter, drawing_info)
-            painter.end()
+            # Draw line overlay if present
+            if has_line_overlay:
+                self._draw_line_overlay(painter, line_drawing_info)
 
+            # Draw ROI overlay if present
+            if has_roi_overlay:
+                self._draw_roi_overlay(painter, roi_drawing_info)
+
+            painter.end()
             self.video_label.setPixmap(self.display_pixmap)
         else:
             # Direct pixmap creation without QPainter for better performance
@@ -328,25 +372,70 @@ class VideoDisplayWidget(QWidget):
         self.video_label.clear()
         self.video_label.setText("No video loaded")
 
-    def _on_mouse_press(self, event):
-        """Handle mouse press events for line drawing."""
-        if event.button() == Qt.LeftButton and self.line_manager.is_drawing:
-            self.is_drawing = True
-            self.start_point = (event.x(), event.y())
+    def set_processing_active(self, active):
+        """Set whether video processing is currently active."""
+        self.processing_active = active
+        logger.info(f"Video display processing active = {active}")
 
-            # Convert widget coordinates to canvas coordinates for line manager
+    def _on_mouse_press(self, event):
+        """Handle mouse press events for line and ROI drawing."""
+        if self.processing_active:
+            logger.info("Mouse event ignored - processing is active")
+            return
+
+        if event.button() == Qt.LeftButton:
             widget_width = self.video_label.width()
             widget_height = self.video_label.height()
-            self.line_manager.start_line(
-                event.x(), event.y(), widget_width, widget_height
-            )
 
-            if self.line_start_callback:
-                self.line_start_callback()
+            if self.drawing_mode == "line" and self.line_manager.is_drawing:
+                self.is_drawing = True
+                self.start_point = (event.x(), event.y())
+
+                # Convert widget coordinates to canvas coordinates for line manager
+                self.line_manager.start_line(
+                    event.x(), event.y(), widget_width, widget_height
+                )
+
+                if self.line_start_callback:
+                    self.line_start_callback()
+
+            elif (
+                self.drawing_mode == "roi"
+                and self.roi_manager
+                and self.roi_manager.is_drawing
+            ):
+                # Add point to ROI polygon
+                logger.info(f"Adding ROI point at ({event.x()}, {event.y()})")
+                closed = self.roi_manager.add_point(
+                    event.x(), event.y(), widget_width, widget_height
+                )
+
+                logger.info(
+                    f"ROI closed = {closed}, has_roi = {self.roi_manager.has_roi()}"
+                )
+
+                self.update_preview()
+
+                if self.roi_point_added_callback:
+                    self.roi_point_added_callback()
+
+                if closed:
+                    # ROI was closed
+                    logger.info("ROI was closed, calling callbacks")
+                    if self.roi_finish_callback:
+                        self.roi_finish_callback()
+                    self.roi_finished.emit()
 
     def _on_mouse_move(self, event):
         """Handle mouse move events for line drawing."""
-        if self.is_drawing and self.line_manager.is_drawing:
+        if self.processing_active:
+            return
+
+        if (
+            self.drawing_mode == "line"
+            and self.is_drawing
+            and self.line_manager.is_drawing
+        ):
             widget_width = self.video_label.width()
             widget_height = self.video_label.height()
             self.line_manager.update_line(
@@ -359,7 +448,14 @@ class VideoDisplayWidget(QWidget):
 
     def _on_mouse_release(self, event):
         """Handle mouse release events for line drawing."""
-        if event.button() == Qt.LeftButton and self.is_drawing:
+        if self.processing_active:
+            return
+
+        if (
+            self.drawing_mode == "line"
+            and event.button() == Qt.LeftButton
+            and self.is_drawing
+        ):
             self.is_drawing = False
 
             widget_width = self.video_label.width()
@@ -380,4 +476,109 @@ class VideoDisplayWidget(QWidget):
         if self.current_frame is not None:
             # Clear cached dimensions on resize
             self.cached_preview_dims = None
+            self.update_preview()
+
+    def _draw_roi_overlay(self, painter: QPainter, roi_drawing_info: Dict[str, Any]):
+        """Draw ROI polygon overlay."""
+        if not roi_drawing_info.get("has_roi", False):
+            return
+
+        canvas_points = roi_drawing_info["canvas_points"]
+        is_drawing = roi_drawing_info["is_drawing"]
+        is_complete = roi_drawing_info["is_complete"]
+
+        if not canvas_points:
+            return
+
+        # Set up painter for ROI drawing
+        if is_complete:
+            # Completed ROI - solid blue line
+            pen = QPen(QColor(0, 0, 255), 3)
+            painter.setPen(pen)
+
+            # Fill with semi-transparent blue
+            painter.setBrush(QColor(0, 0, 255, 50))
+        else:
+            # Drawing in progress - dashed yellow line
+            pen = QPen(QColor(255, 255, 0), 2)
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+
+        # Create polygon from points
+        polygon = QPolygon()
+        for canvas_x, canvas_y in canvas_points:
+            polygon.append(QPoint(int(canvas_x), int(canvas_y)))
+
+        if is_complete:
+            # Draw filled polygon for completed ROI
+            painter.drawPolygon(polygon)
+        else:
+            # Draw lines between consecutive points for ROI in progress
+            for i in range(len(canvas_points)):
+                start_point = canvas_points[i]
+                end_point = (
+                    canvas_points[(i + 1) % len(canvas_points)]
+                    if i == len(canvas_points) - 1 and len(canvas_points) >= 3
+                    else canvas_points[i + 1]
+                    if i < len(canvas_points) - 1
+                    else None
+                )
+
+                if end_point:
+                    painter.drawLine(
+                        int(start_point[0]),
+                        int(start_point[1]),
+                        int(end_point[0]),
+                        int(end_point[1]),
+                    )
+
+        # Draw points as small circles
+        painter.setBrush(QColor(255, 255, 255))
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        for canvas_x, canvas_y in canvas_points:
+            painter.drawEllipse(int(canvas_x) - 4, int(canvas_y) - 4, 8, 8)
+
+        # Draw text instructions
+        if is_drawing and len(canvas_points) < 3:
+            painter.setPen(QPen(QColor(255, 255, 255), 2))
+            painter.setFont(QFont("Arial", 12, QFont.Bold))
+            painter.drawText(
+                10, 30, "Click to add points. Need at least 3 points to close."
+            )
+        elif is_drawing and len(canvas_points) >= 3:
+            painter.setPen(QPen(QColor(255, 255, 255), 2))
+            painter.setFont(QFont("Arial", 12, QFont.Bold))
+            painter.drawText(
+                10, 30, "Click near first point to close ROI, or use Cancel button."
+            )
+
+    def show_roi_overlay(self, frame_width: int, frame_height: int):
+        """Show ROI overlay on the current frame during processing."""
+        if (
+            self.roi_manager
+            and self.roi_manager.has_roi()
+            and self.original_frame is not None
+        ):
+            # Create a copy of the current frame for overlay
+            overlay_frame = self.current_frame.copy()
+
+            # Create ROI mask
+            roi_mask = self.roi_manager.create_roi_mask(frame_width, frame_height)
+
+            # Create colored overlay for ROI area
+            overlay_color = np.array([0, 255, 255], dtype=overlay_frame.dtype)  # Cyan
+            overlay_img = np.zeros_like(overlay_frame)
+            overlay_img[roi_mask > 0] = overlay_color
+
+            # Blend the frame with the ROI overlay
+            self.current_frame = cv2.addWeighted(
+                overlay_img, 0.2, overlay_frame, 0.8, 0
+            )
+            self.update_preview()
+
+    def clear_roi_overlay(self):
+        """Clear ROI overlay and restore original frame."""
+        if self.original_frame is not None:
+            self.current_frame = self.original_frame.copy()
             self.update_preview()
