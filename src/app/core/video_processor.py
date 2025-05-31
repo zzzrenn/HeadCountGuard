@@ -18,17 +18,27 @@ class VideoProcessor:
         tracking_config: Dict[str, Any],
         line_crossing_config: Dict[str, Any],
     ):
+        """Initialize video processor with configurations."""
+        # Initialize detector
+        logger.info("Initializing detector...")
         self.detector = PersonDetector(**detector_config)
+
+        # Initialize tracker
+        logger.info("Initializing tracker...")
         self.tracker = PersonTracker(**tracking_config)
-        self.counter: Optional[LineCrossingCounter] = None
+
+        # Store configurations
         self.line_crossing_config = line_crossing_config
 
-        # Video properties
-        self.cap: Optional[cv2.VideoCapture] = None
+        # Video processing variables
         self.video_path: Optional[str] = None
+        self.cap: Optional[cv2.VideoCapture] = None
         self.frame_width = 0
         self.frame_height = 0
         self.video_fps = 30
+
+        # Counter
+        self.counter: Optional[LineCrossingCounter] = None
 
         # Processing state
         self.is_running = False
@@ -41,6 +51,10 @@ class VideoProcessor:
         self.frame_callback: Optional[Callable] = None
         self.count_callback: Optional[Callable] = None
         self.complete_callback: Optional[Callable] = None
+
+        # ROI mask for bbox filtering (separate from counter's ROI)
+        self.roi_mask_for_display: Optional[np.ndarray] = None
+        self.bbox_filter_enabled = False
 
     def load_video(self, video_path: str) -> bool:
         """Load a video file and extract properties."""
@@ -186,17 +200,20 @@ class VideoProcessor:
         # Draw bounding boxes and IDs
         for obj in tracked_objects:
             bbox = obj["bbox"]
-            x1, y1, x2, y2 = map(int, bbox)
-            cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(
-                frame_rgb,
-                f"ID: {obj['track_id']}",
-                (x1, y1 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                2,
-            )
+
+            # Apply ROI filtering for display if enabled
+            if self._bbox_intersects_roi(bbox):
+                x1, y1, x2, y2 = map(int, bbox)
+                cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(
+                    frame_rgb,
+                    f"ID: {obj['track_id']}",
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    2,
+                )
 
         self.current_frame_number += 1
 
@@ -228,3 +245,30 @@ class VideoProcessor:
         if self.cap:
             self.cap.release()
             self.cap = None
+
+    def set_roi_for_display(self, roi_mask: np.ndarray):
+        """Set ROI mask specifically for bounding box display filtering."""
+        self.roi_mask_for_display = roi_mask
+
+    def set_bbox_filter_enabled(self, enabled: bool):
+        """Enable or disable bounding box filtering based on ROI intersection."""
+        self.bbox_filter_enabled = enabled
+
+    def _bbox_intersects_roi(self, bbox: List[float]) -> bool:
+        """Check if a bounding box intersects with the ROI mask."""
+        if self.roi_mask_for_display is None or not self.bbox_filter_enabled:
+            return True
+
+        x1, y1, x2, y2 = map(int, bbox)
+
+        # Clamp coordinates to valid range
+        x1 = max(0, min(x1, self.frame_width - 1))
+        y1 = max(0, min(y1, self.frame_height - 1))
+        x2 = max(0, min(x2, self.frame_width - 1))
+        y2 = max(0, min(y2, self.frame_height - 1))
+
+        # Extract the bounding box area from the ROI mask
+        roi_region = self.roi_mask_for_display[y1 : y2 + 1, x1 : x2 + 1]
+
+        # Check if any pixel in the bounding box area is part of the ROI
+        return np.any(roi_region > 0) if roi_region.size > 0 else False

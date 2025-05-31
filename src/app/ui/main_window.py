@@ -4,10 +4,12 @@ from collections import deque
 import numpy as np
 from loguru import logger
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QMainWindow,
+    QShortcut,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -45,6 +47,7 @@ class PeopleCounterApp(QMainWindow):
         self.line_drawn = False
         self.side_selected = False
         self.selected_side = None
+        self.bbox_filter_enabled = True  # Enable by default
 
         # FPS tracking
         self.frame_times = deque(maxlen=30)  # Keep last 30 frame times for averaging
@@ -60,7 +63,8 @@ class PeopleCounterApp(QMainWindow):
     def setup_ui(self):
         """Setup the user interface."""
         self.setWindowTitle("People Counter - PyQt")
-        self.setGeometry(100, 100, 1400, 900)
+        self.showFullScreen()
+        self.setWindowState(Qt.WindowFullScreen)
 
         # Create central widget
         central_widget = QWidget()
@@ -108,6 +112,9 @@ class PeopleCounterApp(QMainWindow):
         video_frame.setMinimumWidth(600)
         right_panel.setMinimumWidth(350)
 
+        # Setup keyboard shortcuts
+        self.setup_shortcuts()
+
     def setup_callbacks(self):
         """Setup callbacks between components."""
         # Video display callbacks
@@ -128,6 +135,8 @@ class PeopleCounterApp(QMainWindow):
             side_select_callback=self.on_side_selected,
             side_preview_callback=self.on_side_preview,
             side_clear_callback=self.on_side_clear,
+            exit_callback=self.on_exit_clicked,
+            bbox_filter_callback=self.on_bbox_filter_toggled,
         )
 
         # Video processor callbacks
@@ -168,6 +177,11 @@ class PeopleCounterApp(QMainWindow):
         self.controls.draw_line_btn.setEnabled(False)  # Will be enabled below
         self.controls.side_group.setEnabled(False)
         self.controls.roi_group.setEnabled(False)
+
+        # Enable bbox filter checkbox and set it checked by default
+        self.controls.enable_bbox_filter(True)
+        self.controls.bbox_filter_checkbox.setChecked(True)
+        self.bbox_filter_enabled = True
 
         # Reset ROI button states specifically
         self.controls.draw_roi_btn.setEnabled(
@@ -213,6 +227,10 @@ class PeopleCounterApp(QMainWindow):
         self.controls.roi_group.setEnabled(False)
         self.controls.confirm_btn.setEnabled(False)
 
+        # Keep bbox filter enabled and checked
+        self.controls.enable_bbox_filter(True)
+        self.controls._roi_available = False
+
         # Start line drawing
         self.line_manager.start_drawing()
 
@@ -232,6 +250,10 @@ class PeopleCounterApp(QMainWindow):
         # For now, disable it and let user choose skip or draw ROI again
         self.controls.confirm_btn.setEnabled(False)
 
+        # Update ROI availability but keep bbox filter enabled
+        self.controls._roi_available = False
+        self.controls.enable_bbox_filter(True)
+
     def on_skip_roi_clicked(self):
         """Handle skip ROI button click - enable confirm button for processing without ROI."""
         logger.info("Skip ROI clicked - enabling confirm button")
@@ -239,6 +261,10 @@ class PeopleCounterApp(QMainWindow):
         self.controls.confirm_btn.setEnabled(True)
         # Keep ROI drawing options enabled in case user changes their mind
         # Don't disable the draw_roi_btn and skip_roi_btn
+
+        # Update ROI availability but keep bbox filter enabled
+        self.controls._roi_available = False
+        self.controls.enable_bbox_filter(True)
 
     def on_confirm_clicked(self):
         """Handle confirm button click - start processing with ROI."""
@@ -261,8 +287,17 @@ class PeopleCounterApp(QMainWindow):
                 "Main window - ROI manager has ROI, calling controls.on_roi_finished()"
             )
             self.controls.on_roi_finished()
+            # Update ROI availability and keep bbox filter enabled
+            self.controls._roi_available = True
+            self.controls.enable_bbox_filter(True)
+            # The filter should already be checked by default
+            if not self.bbox_filter_enabled:
+                self.controls.bbox_filter_checkbox.setChecked(True)
+                self.bbox_filter_enabled = True
         else:
             logger.info("Main window - ROI manager does NOT have ROI")
+            self.controls._roi_available = False
+            self.controls.enable_bbox_filter(True)
 
     def on_side_selected(self, side: str):
         """Handle side selection."""
@@ -291,20 +326,36 @@ class PeopleCounterApp(QMainWindow):
         if not normalized_line:
             return
 
+        # Get video properties for ROI mask creation
+        props = self.video_processor.get_video_properties()
+
         if self.roi_manager.has_roi():
             # Use line + ROI
-            props = self.video_processor.get_video_properties()
             roi_mask = self.roi_manager.create_roi_mask(props["width"], props["height"])
             self.video_processor.setup_counter_with_roi(
                 normalized_line, self.selected_side, roi_mask
             )
+
+            # Set ROI mask for display filtering
+            self.video_processor.set_roi_for_display(roi_mask)
+            self.video_processor.set_bbox_filter_enabled(self.bbox_filter_enabled)
+
+            # Keep bbox filter available during processing
+            self.controls.enable_bbox_filter(True)
+
             logger.info("Starting processing with line and ROI filter")
         else:
             # Use line only
             self.video_processor.setup_counter(normalized_line, self.selected_side)
+
+            # No ROI available, but keep bbox filter enabled (it will show all boxes)
+            self.video_processor.set_roi_for_display(None)
+            self.video_processor.set_bbox_filter_enabled(self.bbox_filter_enabled)
+            self.controls.enable_bbox_filter(True)
+
             logger.info("Starting processing with line only")
 
-        # Disable all controls during processing
+        # Disable all drawing controls during processing but keep bbox filter if available
         self.controls.disable_all_drawing()
 
         # Start video processing
@@ -322,23 +373,24 @@ class PeopleCounterApp(QMainWindow):
             self.video_display.clear_preview()
 
     def start_video_processing(self):
-        """Start the video processing loop."""
-        if self.video_processor.start_processing():
-            self.is_processing = True
+        """Start the video processing timer."""
+        if not self.video_processor.start_processing():
+            logger.error("Failed to start video processing")
+            return
 
-            # Finalize all line/mask calculations for video processing
-            # This ensures no expensive calculations happen during playback
-            widget_width = self.video_display.video_label.width()
-            widget_height = self.video_display.video_label.height()
-            self.line_manager.finalize_for_processing(widget_width, widget_height)
+        # Start processing timer
+        # Use a shorter interval for better responsiveness
+        self.processing_timer.start(16)  # ~60 FPS
 
-            # Reset FPS tracking for processing
-            self.frame_times.clear()
-            self.last_frame_time = None
-            # Calculate frame rate for timer
+        # Update UI state
+        self.is_processing = True
+
+        # Show ROI overlay if available
+        if self.roi_manager.has_roi():
             props = self.video_processor.get_video_properties()
-            frame_interval = int(1000 / props["fps"])  # Convert to milliseconds
-            self.processing_timer.start(frame_interval)
+            self.video_display.show_roi_overlay(props["width"], props["height"])
+
+        logger.info("Video processing started")
 
     def process_video_frame(self):
         """Process a single video frame."""
@@ -392,6 +444,24 @@ class PeopleCounterApp(QMainWindow):
         """Handle video processing completion."""
         self.is_processing = False
         self.processing_timer.stop()
+
+        # Re-enable canvas interactions
+        self.video_display.set_processing_active(False)
+
+        # Clear ROI overlay
+        self.video_display.clear_roi_overlay()
+
+        # Re-enable controls based on current state
+        if self.line_drawn:
+            self.controls.enable_line_drawing()
+        if self.side_selected:
+            self.controls.enable_side_selection()
+        if self.line_drawn and self.side_selected:
+            self.controls.enable_roi_options()
+
+        # Update bbox filter availability based on ROI state
+        self._update_bbox_filter_availability()
+
         # Final histogram update
         self.histogram.update_plot(count_history, frame_history)
         logger.info("Video playback completed - ready for new video")
@@ -419,3 +489,51 @@ class PeopleCounterApp(QMainWindow):
         if self.processing_timer.isActive():
             self.processing_timer.stop()
         self.video_processor.release()
+
+    def setup_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        # Escape key to exit full screen (go to windowed mode)
+        self.escape_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self.escape_shortcut.activated.connect(self.exit_full_screen)
+
+        # F11 to toggle full screen
+        self.f11_shortcut = QShortcut(QKeySequence(Qt.Key_F11), self)
+        self.f11_shortcut.activated.connect(self.toggle_full_screen)
+
+        # Ctrl+Q to quit application
+        self.quit_shortcut = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.quit_shortcut.activated.connect(self.close)
+
+    def on_exit_clicked(self):
+        """Handle exit button click."""
+        self.close()
+
+    def exit_full_screen(self):
+        """Exit full screen mode and go to windowed mode."""
+        if self.isFullScreen():
+            self.showNormal()
+            self.setGeometry(100, 100, 1400, 900)  # Restore original size
+
+    def toggle_full_screen(self):
+        """Toggle between full screen and windowed mode."""
+        if self.isFullScreen():
+            self.exit_full_screen()
+        else:
+            self.showFullScreen()
+
+    def on_bbox_filter_toggled(self, enabled: bool):
+        """Handle bbox filter toggled."""
+        self.bbox_filter_enabled = enabled
+        logger.info(f"Bbox filter enabled: {self.bbox_filter_enabled}")
+
+        # If processing is active, immediately apply the filter change
+        if self.is_processing:
+            self.video_processor.set_bbox_filter_enabled(self.bbox_filter_enabled)
+
+    def _update_bbox_filter_availability(self):
+        """Update bbox filter availability based on current ROI state."""
+        # Always keep the bbox filter available and checked by default
+        self.controls.enable_bbox_filter(True)
+        if not self.bbox_filter_enabled:
+            self.controls.bbox_filter_checkbox.setChecked(True)
+            self.bbox_filter_enabled = True

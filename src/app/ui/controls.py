@@ -3,6 +3,7 @@ from typing import Callable, Optional
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -26,6 +27,7 @@ class ControlsWidget(QWidget):
     side_selected = pyqtSignal(str)
     side_preview = pyqtSignal(str)
     side_clear = pyqtSignal()
+    bbox_filter_toggled = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -40,6 +42,8 @@ class ControlsWidget(QWidget):
         self.side_select_callback: Optional[Callable] = None
         self.side_preview_callback: Optional[Callable] = None
         self.side_clear_callback: Optional[Callable] = None
+        self.exit_callback: Optional[Callable] = None
+        self.bbox_filter_callback: Optional[Callable] = None
 
         self.setup_ui()
 
@@ -179,6 +183,45 @@ class ControlsWidget(QWidget):
 
         layout.addWidget(counter_group)
 
+        # Display Options section
+        display_group = QGroupBox("Display Options")
+        display_layout = QVBoxLayout(display_group)
+
+        # BBox ROI filter toggle
+        self.bbox_filter_checkbox = QCheckBox("Filter Bounding Boxes by ROI")
+        self.bbox_filter_checkbox.setToolTip(
+            "When enabled, only shows bounding boxes that intersect with the ROI region."
+        )
+        self.bbox_filter_checkbox.setEnabled(True)  # Always enabled
+        self.bbox_filter_checkbox.setChecked(True)  # Checked by default
+        self.bbox_filter_checkbox.stateChanged.connect(self._on_bbox_filter_toggled)
+        display_layout.addWidget(self.bbox_filter_checkbox)
+
+        layout.addWidget(display_group)
+
+        # Add exit button
+        exit_group = QGroupBox("Application")
+        exit_layout = QVBoxLayout(exit_group)
+
+        self.exit_btn = QPushButton("Exit Application")
+        self.exit_btn.setMinimumHeight(40)
+        self.exit_btn.clicked.connect(self._on_exit)
+        self.exit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                font-weight: bold;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """)
+        exit_layout.addWidget(self.exit_btn)
+
+        layout.addWidget(exit_group)
+
         # Add stretch to push everything up
         layout.addStretch()
 
@@ -193,6 +236,8 @@ class ControlsWidget(QWidget):
         side_select_callback: Callable = None,
         side_preview_callback: Callable = None,
         side_clear_callback: Callable = None,
+        exit_callback: Callable = None,
+        bbox_filter_callback: Callable = None,
     ):
         """Set callback functions for control events."""
         self.video_select_callback = video_select_callback
@@ -204,6 +249,8 @@ class ControlsWidget(QWidget):
         self.side_select_callback = side_select_callback
         self.side_preview_callback = side_preview_callback
         self.side_clear_callback = side_clear_callback
+        self.exit_callback = exit_callback
+        self.bbox_filter_callback = bbox_filter_callback
 
     def update_count_display(self, count: int):
         """Update the count display."""
@@ -297,12 +344,44 @@ class ControlsWidget(QWidget):
         self.confirm_btn.setEnabled(True)
 
     def disable_all_drawing(self):
-        """Disable all drawing controls when processing starts."""
+        """Disable all drawing controls during processing."""
         self.draw_line_btn.setEnabled(False)
         self.side_group.setEnabled(False)
         self.roi_group.setEnabled(False)
+
+    def enable_bbox_filter(self, enabled: bool):
+        """Enable or disable the bounding box ROI filter checkbox."""
+        # Always keep the checkbox enabled, just update the tooltip
+        self.bbox_filter_checkbox.setEnabled(True)
+
+        # Update tooltip based on ROI availability
+        if enabled and hasattr(self, "_roi_available") and self._roi_available:
+            self.bbox_filter_checkbox.setToolTip(
+                "Filter bounding boxes by ROI intersection.\n"
+                "Toggle this at any time during processing."
+            )
+        else:
+            self.bbox_filter_checkbox.setToolTip(
+                "Filter bounding boxes by ROI intersection.\n"
+                "When no ROI is defined, this has no effect (shows all boxes).\n"
+                "Draw an ROI to use this filter effectively."
+            )
+
+    def is_bbox_filter_enabled(self) -> bool:
+        """Check if the bounding box ROI filter is enabled."""
+        return self.bbox_filter_checkbox.isChecked()
 
     def _on_confirm(self):
         """Handle confirm button click."""
         if self.confirm_callback:
             self.confirm_callback()
+
+    def _on_exit(self):
+        """Handle exit button click."""
+        if self.exit_callback:
+            self.exit_callback()
+
+    def _on_bbox_filter_toggled(self, state):
+        """Handle BBox ROI filter toggle."""
+        if self.bbox_filter_callback:
+            self.bbox_filter_callback(state == Qt.Checked)
