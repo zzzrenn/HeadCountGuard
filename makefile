@@ -5,3 +5,6 @@ run-sample:
 # run tests
 run-tests:
 	pytest -v
+
+run-app:
+	python src/app.py
