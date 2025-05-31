@@ -35,7 +35,7 @@ repos:
         - id: ruff
           name: ruff check naming
           args: ["--fix", "--select", "N"]
-          exclude: src/tracker/bytetrack/.*|__init__.py
+          exclude: src/tracker/bytetrack/.*|__init__.py|src/app/.*
         # perform formatting updates
         - id: ruff-format
           entry: ruff format --force-exclude

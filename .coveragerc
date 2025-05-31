@@ -2,6 +2,9 @@
 omit =
     src/main.py
     src/tracker/bytetrack/*
+    src/app/*
+    src/app.py
+    */archive/*
     */__pycache__/*
     */tests/*
 

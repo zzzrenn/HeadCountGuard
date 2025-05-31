@@ -22,3 +22,6 @@ htmlcov/
 models/
 videos/
 outputs/
+
+# archive
+**/archive/**

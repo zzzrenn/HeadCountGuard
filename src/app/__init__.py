@@ -1,0 +1,1 @@
+# PyQt People Counter Application
